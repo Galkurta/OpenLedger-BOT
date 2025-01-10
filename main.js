@@ -1,190 +1,97 @@
-const fs = require("fs");
-const axios = require("axios");
-const displayBanner = require("./config/banner");
+const readline = require("readline");
 const colors = require("./config/colors");
-const CountdownTimer = require("./config/countdown");
 const logger = require("./config/logger");
+const CountdownTimer = require("./config/countdown");
+const WebSocketClient = require("./modules/wsClient");
+const { showMenu } = require("./modules/menu");
+const {
+  getToken,
+  getAddress,
+  printDivider,
+  formatTime,
+} = require("./modules/utils");
+const {
+  generateToken,
+  checkAppVersion,
+  getUserInfo,
+  getClaimDetails,
+  getStreakInfo,
+  claimReward,
+} = require("./modules/api");
 
-const BASE_URL = "https://apitn.openledger.xyz";
-const REWARDS_URL = "https://rewardstn.openledger.xyz";
-
-const printDivider = () => {
-  logger.info(
-    `${colors.bannerBorder}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${colors.reset}`
-  );
-};
-
-const getToken = () => {
-  try {
-    return fs.readFileSync("data.txt", "utf8").trim();
-  } catch (error) {
-    logger.error(
-      `${colors.error}Error reading token: ${error.message}${colors.reset}`
-    );
-    process.exit(1);
-  }
-};
-
-const api = axios.create({
-  headers: {
-    Accept: "application/json, text/plain, */*",
-    "Accept-Encoding": "gzip, deflate, br, zstd",
-    "Accept-Language": "en-US,en;q=0.9",
-    "Sec-Ch-Ua":
-      '"Google Chrome";v="131", "Chromium";v="131", "Not_A_Brand";v="24"',
-    "Sec-Ch-Ua-Mobile": "?0",
-    "Sec-Ch-Ua-Platform": '"Windows"',
-    "User-Agent":
-      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-  },
+const rl = readline.createInterface({
+  input: process.stdin,
+  output: process.stdout,
 });
 
-const formatTime = (date) => {
-  return new Date(date).toLocaleString("en-US", {
-    timeZone: "Asia/Jakarta",
-    dateStyle: "full",
-    timeStyle: "long",
-  });
-};
-
-async function getUserInfo() {
-  try {
-    const token = getToken();
-    const response = await api.get(`${BASE_URL}/api/v1/users/me`, {
-      headers: { Authorization: token },
-    });
-    printDivider();
-    logger.info(`${colors.accountInfo}[USER INFO]${colors.reset}`);
-    logger.info(
-      `${colors.accountInfo}▸ Address    : ${colors.accountName}${response.data.data.address}${colors.reset}`
-    );
-    logger.info(
-      `${colors.accountInfo}▸ ID         : ${colors.accountName}${response.data.data.id}${colors.reset}`
-    );
-    logger.info(
-      `${colors.accountInfo}▸ Referral   : ${colors.accountName}${response.data.data.referral_code}${colors.reset}`
-    );
-    return response.data;
-  } catch (error) {
-    logger.error(
-      `${colors.accountWarning}Failed to get user info: ${
-        error.response?.data || error.message
-      }${colors.reset}`
-    );
-    return null;
-  }
-}
-
-async function getClaimDetails() {
-  try {
-    const token = getToken();
-    const response = await api.get(`${REWARDS_URL}/api/v1/claim_details`, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    printDivider();
-    logger.info(`${colors.faucetInfo}[CLAIM DETAILS]${colors.reset}`);
-    logger.info(
-      `${colors.faucetInfo}▸ Tier       : ${colors.accountName}${response.data.data.tier}${colors.reset}`
-    );
-    logger.info(
-      `${colors.faucetInfo}▸ Daily Point : ${colors.accountName}${response.data.data.dailyPoint}${colors.reset}`
-    );
-    const status = response.data.data.claimed
-      ? `${colors.faucetWait}Claimed${colors.reset}`
-      : `${colors.faucetSuccess}Available${colors.reset}`;
-    logger.info(`${colors.faucetInfo}▸ Status     : ${status}`);
-    return response.data;
-  } catch (error) {
-    logger.error(
-      `${colors.faucetError}Failed to get claim details: ${
-        error.response?.data || error.message
-      }${colors.reset}`
-    );
-    return null;
-  }
-}
-
-async function getStreakInfo() {
-  try {
-    const token = getToken();
-    const response = await api.get(`${REWARDS_URL}/api/v1/streak`, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    printDivider();
-    logger.info(`${colors.taskInProgress}[STREAK INFO]${colors.reset}`);
-    const claimedDays = response.data.data.filter(
-      (day) => day.isClaimed
-    ).length;
-    logger.info(
-      `${colors.taskInProgress}▸ Current    : ${colors.taskComplete}${claimedDays} days${colors.reset}`
-    );
-    return response.data;
-  } catch (error) {
-    logger.error(
-      `${colors.taskFailed}Failed to get streak info: ${
-        error.response?.data || error.message
-      }${colors.reset}`
-    );
-    return null;
-  }
-}
-
-async function claimReward() {
-  try {
-    const token = getToken();
-    const response = await api.get(`${REWARDS_URL}/api/v1/claim_reward`, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    if (response.data.status === "SUCCESS") {
-      printDivider();
-      logger.success(`${colors.faucetSuccess}[CLAIM SUCCESS]${colors.reset}`);
-      logger.info(
-        `${colors.faucetInfo}▸ Message    : ${colors.faucetSuccess}Daily reward claimed successfully!${colors.reset}`
-      );
-      logger.info(
-        `${colors.faucetInfo}▸ Next Claim : ${colors.faucetSuccess}${formatTime(
-          response.data.data.nextClaim
-        )}${colors.reset}`
-      );
-    }
-    return response.data;
-  } catch (error) {
-    logger.error(
-      `${colors.faucetError}Failed to claim reward: ${
-        error.response?.data || error.message
-      }${colors.reset}`
-    );
-    return null;
-  }
-}
-
 async function startCountdown(nextClaimTime) {
-  const nextClaim = new Date(nextClaimTime);
-  const now = new Date();
-  const delayInSeconds = Math.max(0, Math.floor((nextClaim - now) / 1000));
+  try {
+    const now = new Date().getTime();
+    const nextClaim = new Date(nextClaimTime).getTime();
+    const timeLeft = Math.floor((nextClaim - now) / 1000);
 
-  if (delayInSeconds <= 0) {
-    return 0;
+    if (timeLeft > 0) {
+      const timer = new CountdownTimer({
+        message: "Next claim in: ",
+        format: "HH:mm:ss",
+      });
+      await timer.start(timeLeft);
+    }
+    return timeLeft > 0 ? timeLeft * 1000 : 0;
+  } catch (error) {
+    logger.error(
+      `${colors.error}Countdown error: ${error.message}${colors.reset}`
+    );
+    return 60 * 60 * 1000; // Default to 1 hour if error
+  }
+}
+
+async function startHeartbeat() {
+  // Check app version first
+  const authToken = getToken();
+  const versionInfo = await checkAppVersion(authToken);
+  if (!versionInfo) {
+    logger.error(
+      `${colors.error}Failed to get app version info. Aborting...${colors.reset}`
+    );
+    return;
   }
 
-  printDivider();
-  logger.warn(`${colors.timerWarn}[NEXT CLAIM]${colors.reset}`);
+  if (versionInfo.under_maintenance) {
+    logger.error(
+      `${colors.error}App is under maintenance. Please try again later.${colors.reset}`
+    );
+    return;
+  }
 
-  const countdownTimer = new CountdownTimer({
-    message: "▸ Waiting    : ",
-    colors: {
-      message: colors.timerCount,
-      timer: colors.timerWarn,
-      reset: colors.reset,
-    },
+  // Get address and generate token
+  const address = getAddress();
+  let tokenResponse = await generateToken(address);
+  while (!tokenResponse?.token) {
+    logger.warn(
+      `${colors.warning}Failed to generate token, retrying in 3s...${colors.reset}`
+    );
+    await new Promise((resolve) => setTimeout(resolve, 3000));
+    tokenResponse = await generateToken(address);
+  }
+
+  logger.success(
+    `${colors.success}Token generated successfully${colors.reset}`
+  );
+
+  // Create and connect WebSocket client
+  const wsClient = new WebSocketClient(tokenResponse.token, address);
+  wsClient.connect();
+
+  // Handle process termination
+  process.on("SIGINT", () => {
+    wsClient.close();
+    process.exit(0);
   });
-
-  await countdownTimer.start(delayInSeconds);
-  return delayInSeconds * 1000;
 }
 
 async function runAutoClaim() {
-  displayBanner();
+  const token = getToken();
   logger.info(
     `${colors.menuOption}▸ Time       : ${colors.info}${formatTime(
       new Date()
@@ -192,7 +99,7 @@ async function runAutoClaim() {
   );
 
   try {
-    const userInfo = await getUserInfo();
+    const userInfo = await getUserInfo(token);
     if (!userInfo) {
       logger.error(
         `${colors.error}Failed to get user info. Retrying in 1 hour...${colors.reset}`
@@ -200,7 +107,7 @@ async function runAutoClaim() {
       return 60 * 60 * 1000;
     }
 
-    const claimDetails = await getClaimDetails();
+    const claimDetails = await getClaimDetails(token);
     if (!claimDetails) {
       logger.error(
         `${colors.error}Failed to get claim details. Retrying in 1 hour...${colors.reset}`
@@ -208,7 +115,7 @@ async function runAutoClaim() {
       return 60 * 60 * 1000;
     }
 
-    const streakInfo = await getStreakInfo();
+    const streakInfo = await getStreakInfo(token);
     if (!streakInfo) {
       logger.error(
         `${colors.error}Failed to get streak info. Retrying in 1 hour...${colors.reset}`
@@ -217,7 +124,7 @@ async function runAutoClaim() {
     }
 
     if (!claimDetails.data.claimed) {
-      const claimResult = await claimReward();
+      const claimResult = await claimReward(token);
       if (claimResult?.status === "SUCCESS") {
         return startCountdown(claimResult.data.nextClaim);
       }
@@ -250,8 +157,44 @@ async function startAutoClaimLoop() {
   }
 }
 
-startAutoClaimLoop().catch((error) =>
+async function main() {
+  while (true) {
+    const choice = await showMenu(rl);
+
+    switch (choice) {
+      case "1":
+        logger.info(`${colors.info}Starting Auto Claim...${colors.reset}`);
+        await startAutoClaimLoop();
+        break;
+
+      case "2":
+        logger.info(`${colors.info}Starting Heartbeat...${colors.reset}`);
+        await startHeartbeat();
+        break;
+
+      case "3":
+        logger.info(`${colors.info}Exiting...${colors.reset}`);
+        rl.close();
+        process.exit(0);
+        break;
+
+      default:
+        logger.error(
+          `${colors.error}Invalid option. Please try again.${colors.reset}`
+        );
+        break;
+    }
+
+    if (choice === "1" || choice === "2") {
+      break; // Exit the menu loop if a valid service is started
+    }
+  }
+}
+
+// Start the program
+main().catch((error) => {
   logger.error(
-    `${colors.error}Auto claim loop failed: ${error.message}${colors.reset}`
-  )
-);
+    `${colors.error}Program failed: ${error.message}${colors.reset}`
+  );
+  process.exit(1);
+});
