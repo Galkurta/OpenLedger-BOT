@@ -2,29 +2,57 @@ const fs = require("fs");
 const colors = require("../config/colors");
 const logger = require("../config/logger");
 
-const getToken = () => {
+const getTokens = () => {
   try {
-    return fs.readFileSync("data.txt", "utf8").trim();
+    const tokens = fs
+      .readFileSync("data.txt", "utf8")
+      .split("\n")
+      .map((line) => line.trim())
+      .filter((line) => line.length > 0);
+
+    if (tokens.length === 0) {
+      logger.error(`${colors.error}No tokens found in data.txt${colors.reset}`);
+      process.exit(1);
+    }
+    return tokens.map((token, index) => ({
+      token,
+      index: index + 1,
+    }));
   } catch (error) {
     logger.error(
-      `${colors.error}Error reading token: ${error.message}${colors.reset}`
+      `${colors.error}Error reading tokens: ${error.message}${colors.reset}`
     );
     process.exit(1);
   }
 };
 
-const getAddress = () => {
+const getAddresses = () => {
   try {
-    return fs.readFileSync("address.txt", "utf8").trim();
+    const addresses = fs
+      .readFileSync("address.txt", "utf8")
+      .split("\n")
+      .map((line) => line.trim())
+      .filter((line) => line.length > 0);
+
+    if (addresses.length === 0) {
+      logger.error(
+        `${colors.error}No addresses found in address.txt${colors.reset}`
+      );
+      process.exit(1);
+    }
+    return addresses.map((address, index) => ({
+      address,
+      index: index + 1,
+    }));
   } catch (error) {
     logger.error(
-      `${colors.error}Error reading address: ${error.message}${colors.reset}`
+      `${colors.error}Error reading addresses: ${error.message}${colors.reset}`
     );
     process.exit(1);
   }
 };
 
-function generateRandomCapacity() {
+const generateRandomCapacity = () => {
   function getRandomFloat(min, max, decimals = 2) {
     return (Math.random() * (max - min) + min).toFixed(decimals);
   }
@@ -35,7 +63,7 @@ function generateRandomCapacity() {
     AvailableGPU: "",
     AvailableModels: [],
   };
-}
+};
 
 const formatTime = (date) => {
   return new Date(date).toLocaleString("en-US", {
@@ -52,8 +80,8 @@ const printDivider = () => {
 };
 
 module.exports = {
-  getToken,
-  getAddress,
+  getTokens,
+  getAddresses,
   generateRandomCapacity,
   formatTime,
   printDivider,

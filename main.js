@@ -1,12 +1,12 @@
 const readline = require("readline");
+const CountdownTimer = require("./config/countdown");
 const colors = require("./config/colors");
 const logger = require("./config/logger");
-const CountdownTimer = require("./config/countdown");
 const WebSocketClient = require("./modules/wsClient");
 const { showMenu } = require("./modules/menu");
 const {
-  getToken,
-  getAddress,
+  getTokens,
+  getAddresses,
   printDivider,
   formatTime,
 } = require("./modules/utils");
@@ -24,32 +24,49 @@ const rl = readline.createInterface({
   output: process.stdout,
 });
 
-async function startCountdown(nextClaimTime) {
+async function startCountdown(nextClaimTime, accountIndex) {
   try {
     const now = new Date().getTime();
     const nextClaim = new Date(nextClaimTime).getTime();
     const timeLeft = Math.floor((nextClaim - now) / 1000);
 
     if (timeLeft > 0) {
+      printDivider();
+      logger.info(
+        `${colors.info}[Account #${accountIndex}] [COUNTDOWN]${colors.reset}`
+      );
       const timer = new CountdownTimer({
-        message: "Next claim in: ",
+        showCursor: false,
+        message: `${colors.timerCount}▸ Next claim in: ${colors.reset}`,
         format: "HH:mm:ss",
+        clearOnComplete: true,
       });
       await timer.start(timeLeft);
+      return timeLeft * 1000;
     }
-    return timeLeft > 0 ? timeLeft * 1000 : 0;
+    return 0;
   } catch (error) {
     logger.error(
-      `${colors.error}Countdown error: ${error.message}${colors.reset}`
+      `${colors.error}[Account #${accountIndex}] Countdown error: ${error.message}${colors.reset}`
     );
-    return 60 * 60 * 1000; // Default to 1 hour if error
+    return 60 * 60 * 1000;
   }
 }
 
 async function startHeartbeat() {
-  // Check app version first
-  const authToken = getToken();
-  const versionInfo = await checkAppVersion(authToken);
+  const addresses = getAddresses();
+  const wsClients = [];
+
+  // Check app version first for one account
+  const testToken = await generateToken(addresses[0].address);
+  if (!testToken?.token) {
+    logger.error(
+      `${colors.error}Failed to generate test token. Aborting...${colors.reset}`
+    );
+    return;
+  }
+
+  const versionInfo = await checkAppVersion(testToken.token);
   if (!versionInfo) {
     logger.error(
       `${colors.error}Failed to get app version info. Aborting...${colors.reset}`
@@ -64,74 +81,76 @@ async function startHeartbeat() {
     return;
   }
 
-  // Get address and generate token
-  const address = getAddress();
-  let tokenResponse = await generateToken(address);
-  while (!tokenResponse?.token) {
-    logger.warn(
-      `${colors.warning}Failed to generate token, retrying in 3s...${colors.reset}`
+  // Start WebSocket clients for all addresses
+  for (const account of addresses) {
+    logger.info(
+      `${colors.info}Starting heartbeat for Account #${account.index}...${colors.reset}`
     );
-    await new Promise((resolve) => setTimeout(resolve, 3000));
-    tokenResponse = await generateToken(address);
+
+    let tokenResponse = await generateToken(account.address);
+    while (!tokenResponse?.token) {
+      logger.warn(
+        `${colors.warning}Failed to generate token for Account #${account.index}, retrying in 3s...${colors.reset}`
+      );
+      await new Promise((resolve) => setTimeout(resolve, 3000));
+      tokenResponse = await generateToken(account.address);
+    }
+
+    const wsClient = new WebSocketClient(tokenResponse.token, account.address);
+    wsClient.connect();
+    wsClients.push(wsClient);
+    await new Promise((resolve) => setTimeout(resolve, 2000));
   }
 
-  logger.success(
-    `${colors.success}Token generated successfully${colors.reset}`
-  );
-
-  // Create and connect WebSocket client
-  const wsClient = new WebSocketClient(tokenResponse.token, address);
-  wsClient.connect();
-
-  // Handle process termination
   process.on("SIGINT", () => {
-    wsClient.close();
+    wsClients.forEach((client) => client.close());
     process.exit(0);
   });
 }
 
-async function runAutoClaim() {
-  const token = getToken();
+async function runAutoClaim(accountData) {
   logger.info(
-    `${colors.menuOption}▸ Time       : ${colors.info}${formatTime(
-      new Date()
-    )}${colors.reset}`
+    `${colors.menuOption}[Account #${accountData.index}] Time: ${
+      colors.info
+    }${formatTime(new Date())}${colors.reset}`
   );
 
   try {
-    const userInfo = await getUserInfo(token);
+    const userInfo = await getUserInfo(accountData.token);
     if (!userInfo) {
       logger.error(
-        `${colors.error}Failed to get user info. Retrying in 1 hour...${colors.reset}`
+        `${colors.error}[Account #${accountData.index}] Failed to get user info. Retrying in 1 hour...${colors.reset}`
       );
       return 60 * 60 * 1000;
     }
 
-    const claimDetails = await getClaimDetails(token);
+    const claimDetails = await getClaimDetails(accountData.token);
     if (!claimDetails) {
       logger.error(
-        `${colors.error}Failed to get claim details. Retrying in 1 hour...${colors.reset}`
+        `${colors.error}[Account #${accountData.index}] Failed to get claim details. Retrying in 1 hour...${colors.reset}`
       );
       return 60 * 60 * 1000;
     }
 
-    const streakInfo = await getStreakInfo(token);
+    const streakInfo = await getStreakInfo(accountData.token);
     if (!streakInfo) {
       logger.error(
-        `${colors.error}Failed to get streak info. Retrying in 1 hour...${colors.reset}`
+        `${colors.error}[Account #${accountData.index}] Failed to get streak info. Retrying in 1 hour...${colors.reset}`
       );
       return 60 * 60 * 1000;
     }
 
     if (!claimDetails.data.claimed) {
-      const claimResult = await claimReward(token);
+      const claimResult = await claimReward(accountData.token);
       if (claimResult?.status === "SUCCESS") {
-        return startCountdown(claimResult.data.nextClaim);
+        return startCountdown(claimResult.data.nextClaim, accountData.index);
       }
       return 60 * 60 * 1000;
     } else {
       printDivider();
-      logger.warn(`${colors.faucetWait}[CLAIM STATUS]${colors.reset}`);
+      logger.warn(
+        `${colors.faucetWait}[Account #${accountData.index}] [CLAIM STATUS]${colors.reset}`
+      );
       logger.info(
         `${colors.faucetInfo}▸ Status     : ${colors.faucetWait}Already claimed today${colors.reset}`
       );
@@ -140,20 +159,29 @@ async function runAutoClaim() {
           claimDetails.data.nextClaim
         )}${colors.reset}`
       );
-      return startCountdown(claimDetails.data.nextClaim);
+      return startCountdown(claimDetails.data.nextClaim, accountData.index);
     }
   } catch (error) {
     logger.error(
-      `${colors.error}Auto claim process failed: ${error.message}${colors.reset}`
+      `${colors.error}[Account #${accountData.index}] Auto claim process failed: ${error.message}${colors.reset}`
     );
     return 60 * 60 * 1000;
   }
 }
 
 async function startAutoClaimLoop() {
+  const accounts = getTokens();
+
   while (true) {
-    const delay = await runAutoClaim();
-    await new Promise((resolve) => setTimeout(resolve, delay));
+    const delays = await Promise.all(
+      accounts.map(async (account, index) => {
+        await new Promise((resolve) => setTimeout(resolve, index * 2000));
+        return runAutoClaim(account);
+      })
+    );
+
+    const minDelay = Math.min(...delays);
+    await new Promise((resolve) => setTimeout(resolve, minDelay));
   }
 }
 
@@ -163,12 +191,16 @@ async function main() {
 
     switch (choice) {
       case "1":
-        logger.info(`${colors.info}Starting Auto Claim...${colors.reset}`);
+        logger.info(
+          `${colors.info}Starting Auto Claim for multiple accounts...${colors.reset}`
+        );
         await startAutoClaimLoop();
         break;
 
       case "2":
-        logger.info(`${colors.info}Starting Heartbeat...${colors.reset}`);
+        logger.info(
+          `${colors.info}Starting Heartbeat for multiple accounts...${colors.reset}`
+        );
         await startHeartbeat();
         break;
 
@@ -186,12 +218,11 @@ async function main() {
     }
 
     if (choice === "1" || choice === "2") {
-      break; // Exit the menu loop if a valid service is started
+      break;
     }
   }
 }
 
-// Start the program
 main().catch((error) => {
   logger.error(
     `${colors.error}Program failed: ${error.message}${colors.reset}`

@@ -1,7 +1,7 @@
 const axios = require("axios");
 const colors = require("../config/colors");
 const logger = require("../config/logger");
-const { printDivider } = require("./utils");
+const { printDivider, formatTime } = require("./utils");
 const { BASE_URL, REWARDS_URL, HEADERS } = require("./constants");
 
 async function generateToken(address) {
